@@ -770,7 +770,9 @@ const THRESHOLDS = {
   savingsMonthsAmple: 12, // 貯金が生活費12か月分以上 → 収入の少なさ・赤字を貯金で当面まかなえるとみなす（当ツールの目安）
   deficitRunwayMonths: 36,// 赤字でも、貯金で3年以上もつなら「危険」ではなく「注意」にとどめる（当ツールの目安）
   deficitRunwayMonthsElderly: 240, // 65歳以上がいる世帯は、これから先が長いので20年以上もつときだけ「注意」にとどめる（2026-10-23 坂口さん指示。当ツールの目安）
-  savingsMonthsHideSupport: 36 // 貯金が生活費36か月分以上 → 収入が少なくても、生活保護などの案内は出さず、リスク度も「やや注意」までにとどめる（生活保護は預貯金の活用が前提のため）
+  deficitToleranceYen: 5000, // ただし月5,000円以下のときだけ（収入が多い世帯で数万円の赤字を端数にしない）
+  deficitTolerance: 0.03, // 毎月の赤字が収入の3％未満なら「ほぼ収支とんとん」とみなし、「危険」にはしない（端数のずれで警告が出ないように）
+  savingsMonthsHideSupport: 36 //貯金が生活費36か月分以上 → 収入が少なくても、生活保護などの案内は出さず、リスク度も「やや注意」までにとどめる（生活保護は預貯金の活用が前提のため）
   /* 「収入が生活保護のめやすを下回っている可能性」の判定は、以前は
      単身9.5万円・2人以上13万円の固定額だったが、3人以上の世帯で低すぎたため、
      2026-09-27 から下の SEIHO_KIJUN で世帯ごとに試算する方式に改めた。 */
@@ -1341,7 +1343,8 @@ function tokureiHTML(D){
     h += '<p>住民税が非課税かどうかで、<b>返済の全部または一部が免除になる可能性</b>があります。借りたご本人と世帯主のどちらにも住民税（均等割・所得割）がかかっていない年度があれば、免除の対象になることがあります（どの年度で判定するかは、資金の種類によって違います）。</p>' +
       '<p><b>確かめ方：</b>役場から届く住民税の通知書で分かります。手元になければ、<b>その年の1月1日に住んでいた市町村</b>の役場で「課税（非課税）証明書」を取れます。どの年度の証明が必要かは、先にコールセンターでご確認ください。判断が難しいときは、そのままお電話いただいてかまいません。</p>';
   }else{
-    h += '<p>チェックいただいた範囲では、いまのところ免除の要件（住民税非課税・生活保護・重い障害の手帳など）には当てはまっていません。ただし<b>免除の判定は年度ごとの住民税の状況で行われ</b>、令和3年度以降のどこかの年度で非課税だった場合などに当てはまることがあります（返済期間を過ぎた緊急小口資金は、令和7年度以降に2年続けて非課税であることが必要です）。また、借りたあとに結婚・介護などで世帯が変わった方や、DVで避難している方は、ご本人だけの非課税で判定されることがあります。状況が変わったときや、わからないときはご相談ください。</p>';
+    /* 免除の確認欄に何もチェックがないとき：「当てはまらない」と言い切らず、確認を促す（チェックしていない＝要件に当てはまらない、とは限らないため） */
+    h += '<p>免除の確認欄にチェックがないため、<b>免除の対象になるかどうかは、ここではお伝えできません</b>。免除の判定は年度ごとの住民税の状況（借りたご本人と世帯主がどちらも非課税だった年度があるか）などで行われ、令和3年度以降のどこかの年度で非課税だった場合などに当てはまることがあります（返済期間を過ぎた緊急小口資金は、令和7年度以降に2年続けて非課税であることが必要です）。心当たりがある場合は、入力画面の「償還免除にあてはまるかの確認」にチェックしてもう一度診断するか、下のコールセンターでお確かめください。</p>';
   }
 
   if(T.monthly > 0 && D.incomeTotal > 0){
@@ -1416,14 +1419,18 @@ function runDiagnosis(){
   const balance = D.incomeTotal - D.expenseTotal;
   const R = assessRisk(D, balance);   // 総合的な家計のリスク度（判定できる項目がなければ null）
 
-  /* --- 収支サマリー --- */
+  /* --- 収支サマリー（金額が収入にも支出にも入っていないときは、0円どうしの「黒字」を出さない） --- */
+  if(D.incomeTotal === 0 && D.expenseTotal === 0){
+    out.push('<div class="skipped-note">ℹ️ 収入にも支出にも金額が入っていないため、<b>収入と支出の分析はしていません</b>。金額を入れてもう一度診断すると、家計の収支や専門指標も見られます。以下は、選んだ項目・チェックした項目から言える範囲の結果です。</div>');
+  } else {
   out.push('<div class="sum-cards">');
   out.push('<div class="sum-card"><div class="t">毎月の収入</div><div class="v">' + yen(D.incomeTotal) + '</div></div>');
   out.push('<div class="sum-card"><div class="t">毎月の支出' + (D.estimated.length ? '（推定含む）' : '') + '</div><div class="v">' + yen(D.expenseTotal) + '</div></div>');
   const cls = balance < 0 ? "deficit" : "surplus";
   out.push('<div class="sum-card ' + cls + '"><div class="t">毎月の収支</div><div class="v">' + (balance >= 0 ? "+" : "−") + yen(Math.abs(balance)).replace("円","") + '円</div></div>');
   out.push('</div>');
-  if(D.incomeTotal > 0 || D.expenseTotal > 0) out.push(barChartHTML(D.incomeTotal, D.expenseTotal));
+  out.push(barChartHTML(D.incomeTotal, D.expenseTotal));
+  }
 
   /* --- 推定・0円扱いの内訳 --- */
   out.push(estimatesNoteHTML(D));
@@ -1458,8 +1465,9 @@ function runDiagnosis(){
     });
   }
 
-  /* --- 生活保護のめやす（参考） --- */
-  out.push(seihoHTML());
+  /* --- 生活保護のめやす（参考）：収入が最低生活費のめやす付近かそれ以下、収入が0円のまま、
+         生活保護を受けた/受けている（特例貸付の回答）のときだけ。余裕のある世帯には出さない --- */
+  if(showSeihoRef(D, R)) out.push(seihoHTML());
 
   /* --- 方針案 --- */
   const plans = buildPlans(D, flags, R);
@@ -1519,6 +1527,40 @@ function minLivingCost(D){
   /* 表示用に千円未満を切り捨てる（低めに見せる側に丸める） */
   return { amount: Math.floor(total / 1000) * 1000, parts, rent };
 }
+/* 借入れの種類から、債務整理（任意整理・過払い金など）の話が当てはまる借入れかを見分ける。
+   消費者金融・カードローン・カードのリボ/キャッシング・ヤミ金が「ある」か「種類が未回答」なら当てはまりうる。
+   住宅ローン・自動車ローン・奨学金・親族からの借入れだけなら、多重債務や過払い金の話は当てはまらない。 */
+const CONSUMER_DEBT_TYPES = ["銀行のカードローン","消費者金融","クレジットカードのリボ払い・キャッシング"];
+function debtKinds(D){
+  const t = D.debtTypes;
+  const consumer = D.yamikin || t.some(x => CONSUMER_DEBT_TYPES.includes(x));
+  /* 借入先の数が、チェックした種類の数より明らかに多い（例：種類は奨学金だけなのに3社）ときは、チェック漏れとみて、消費者金融などもありうるものとして扱う */
+  const mismatch = t.length > 0 && D.debtCount !== null && D.debtCount >= t.length + 2;
+  return {
+    consumer, mismatch,
+    mayBeConsumer: consumer || t.length === 0 || mismatch,
+    mortgage: D.housingType === "own_loan" || t.includes("住宅ローン"),
+    car: t.includes("自動車ローン"),
+    scholarship: t.includes("奨学金"),
+    kin: t.includes("親族・知人からの借入れ"),
+    onlyOrdinary: t.length > 0 && !consumer && !mismatch
+  };
+}
+/* 借入先が多い（多重債務のおそれ）。借入れの種類が住宅ローン・自動車ローン・奨学金などだけ、または預貯金で借金を十分返せて消費者金融などの記入もないなら数えない */
+function isMultiDebt(D){
+  return D.debtCount !== null && D.debtCount >= THRESHOLDS.debtCountDanger && debtKinds(D).mayBeConsumer && !(debtCovered(D) && !debtKinds(D).consumer);
+}
+/* 毎月の赤字がごくわずか（収入の3％未満かつ月5,000円以下）。「危険」「要対応」にはしない */
+function isTinyDeficit(D, balance){
+  return balance < 0 && D.incomeTotal > 0 && -balance < D.incomeTotal * THRESHOLDS.deficitTolerance && -balance <= THRESHOLDS.deficitToleranceYen;
+}
+/* 預貯金で借金の残高を十分に返せる（残高の1.5倍以上ある）。この場合、借金の残高の大きさだけでは「危険」としない（当ツールの目安） */
+function debtCovered(D){
+  return D.debtTotal > 0 && D.savingsKnown && D.savings >= D.debtTotal * 1.5;
+}
+/* 持ち家の世帯か（家賃・住居確保給付金の話が当てはまらない） */
+function isOwnerHome(D){ return D.housingType === "own" || D.housingType === "own_loan"; }
+
 /* 生活福祉資金（貸付）の案内を出してよい「低所得」かどうかの、内部の目安。
    生活保護の最低生活費の1.8倍以内。※画面には出さない（倍率も、この判定をしていることも書かない）。
    最低生活費のめやすは低めの試算なので、この判定も控えめ（出にくい側）になる。世帯人数が未回答なら false。 */
@@ -1526,6 +1568,17 @@ const SHIKIN_TEISHOTOKU_BAIRITSU = 1.8;
 function isLowIncomeForShikin(D){
   const m = minLivingCost(D);
   return !!(m && D.incomeTotal > 0 && D.incomeTotal <= m.amount * SHIKIN_TEISHOTOKU_BAIRITSU);
+}
+/* 生活保護のめやす（参考表・最低生活費の試算）を見せてよいか */
+function showSeihoRef(D, R){
+  /* 世帯人数が未回答でも案内が消えないよう、1人世帯として低めに試算する。
+     試算は医療・障害者加算・勤労控除などを入れていない低めの額なので、境目の世帯も含める（1.3倍）。
+     病気療養・障がい・65歳以上の方がいる世帯と、働いている世帯は、控除や加算で対象が広がるので1.8倍まで見る */
+  const m = minLivingCost(D.hhSize === null ? Object.assign({}, D, {hhSize: 1}) : D);
+  const wide = D.flags.illness || D.flags.disability || D.flags.elderly || ["fulltime","parttime","self"].includes(D.workStatus);
+  const near = !!(m && D.incomeTotal > 0 && D.incomeTotal < m.amount * (wide ? 1.8 : 1.3));
+  const noIncome = D.incomeTotal === 0 && D.expenseTotal > 0;
+  return isBelowMinLiving(D) || near || noIncome || !!(D.tokurei && D.tokurei.active && D.tokurei.seiho);
 }
 /* 収入が最低生活費のめやすを下回っているか */
 function isBelowMinLiving(D){
@@ -1580,14 +1633,14 @@ function indicatorsHTML(D, balance){
     }
     const sr = Math.round(balance / inc * 1000) / 10;
     row("家計収支率（貯蓄率）", (balance >= 0 ? "＋" : "−") + Math.abs(sr) + "％", "＋10％以上が理想",
-        balance < 0 ? 2 : (sr < 10 ? 1 : 0),
+        balance < 0 ? (isTinyDeficit(D, balance) ? 1 : 2) : (sr < 10 ? 1 : 0),
         "収入のうち毎月手元に残る割合");
     if(D.debtTotal > 0){
       const pct = Math.round(D.debtTotal / (inc * 12) * 100);
       row("借金の対年収比", "手取り年収の約 " + pct + "％",
           "貸金業法の総量規制＝<br>年収（税込）の3分の1まで",
-          pct >= 50 ? 2 : (pct >= 33 ? 1 : 0),
-          "借金総額 ÷ 手取り年収（12か月分）の概算。3分の1に近いほど新規借入れの余地がなく、借換えでのやり繰りが行き詰まりやすい");
+          debtCovered(D) ? (pct >= 33 ? 1 : 0) : (pct >= 50 ? 2 : (pct >= 33 ? 1 : 0)),
+          "借金総額 ÷ 手取り年収（12か月分）の概算。3分の1に近いほど新規借入れの余地がなく、借換えでのやり繰りが行き詰まりやすい" + (debtCovered(D) ? "（預貯金で返せる額なので、重くは見ていません）" : ""));
     }
   }
   if(ex > 0 && D.savingsKnown){
@@ -1681,7 +1734,9 @@ function assessRisk(D, balance){
     const pct = Math.round(Math.abs(balance) / inc * 100);
     if(balance < 0){
       const runway = deficitRunway(D, balance);
-      if(runway !== null){
+      if(isTinyDeficit(D, balance)){
+        add("毎月の収支", 1, "ほぼ収支が同じです（毎月約" + yen(-balance) + "の赤字・収入の約" + pct + "％）", "収入の1割以上の黒字がめやす", false);
+      } else if(runway !== null){
         add("毎月の収支", 1, "毎月約" + yen(-balance) + "の赤字です（預貯金がこのペースで" + yearsText(runway) + "もちます）", "収入の1割以上の黒字がめやす", false);
       } else {
         add("毎月の収支", 2, "毎月約" + yen(-balance) + "の赤字です", "収入の1割以上の黒字がめやす", false);
@@ -1713,8 +1768,8 @@ function assessRisk(D, balance){
       if(r >= THRESHOLDS.debtRatioDanger) reasons.push({ lv:2, text:what });
       else if(r >= THRESHOLDS.debtRatioCaution) reasons.push({ lv:1, text:what });
     }
-    if(D.debtCount !== null && D.debtCount >= THRESHOLDS.debtCountDanger) reasons.push({ lv:2, text:"借入先が" + D.debtCount + "か所" + (D.debtCount >= 5 ? "以上" : "") + "あります" });
-    if(inc > 0 && D.debtTotal > 0){
+    if(isMultiDebt(D)) reasons.push({ lv:2, text:"借入先が" + D.debtCount + "か所" + (D.debtCount >= 5 ? "以上" : "") + "あります" });
+    if(inc > 0 && D.debtTotal > 0 && !debtCovered(D)){
       const ratio = D.debtTotal / (inc * 12);
       if(ratio >= 0.5) reasons.push({ lv:2, text:"借金の残高が手取り年収の約" + Math.round(ratio * 100) + "％です" });
       else if(ratio >= 1 / 3) reasons.push({ lv:1, text:"借金の残高が手取り年収の約" + Math.round(ratio * 100) + "％です" });
@@ -1807,7 +1862,7 @@ function riskHTML(R){
       a('https://www.shiruporuto.jp/public/document/container/shinkon/', '金融広報中央委員会「知るぽると」') + '（2017年の広報誌の転載で、アーカイブ）は生活費の半年分を、万一に備える資金の目安として挙げています。どちらも古い解説で、公的機関が定めた基準ではありません。</li>' +
     '<li><b>毎月の収支・支払いの遅れ・住居費（一般的なめやす）</b>：国が定めた基準はなく、家計相談で一般に使われる水準です。</li>' +
     '<li><b>総合の4段階</b>：国が定めた総合指標ではなく、当ツールの決め方です。「要対応」が2つ以上、ヤミ金のおそれ、または家賃・住宅ローン・水道光熱費の滞納があれば<b>非常に高い</b>、「要対応」が1つ、または「注意」が3つ以上なら<b>高め</b>、「注意」が1〜2つなら<b>やや注意</b>、それ以外は<b>低い</b>としています。</li>' +
-    '<li><b>預貯金が多い方の扱い（当ツール独自の目安で、公的な根拠はありません）</b>：預貯金が生活費の12か月分以上あると、収入の少なさの判定を1段階ゆるめます。赤字でも、預貯金が生活費の12か月分以上あり、そのペースで3年以上（65歳以上の方がいる世帯は20年以上）もつときは「要対応」ではなく「注意」にします。預貯金が生活費の36か月分以上あり、滞納もないときは、生活保護などの案内を出さず、総合判定も「やや注意」までにとどめます。預貯金の欄には、ご自身が自由に使えないお金が含まれていることもあるので、あくまで目安です。</li>' +
+    '<li><b>預貯金が多い方の扱い（当ツール独自の目安で、公的な根拠はありません）</b>：預貯金が生活費の12か月分以上あると、収入の少なさの判定を1段階ゆるめます。赤字でも、預貯金が生活費の12か月分以上あり、そのペースで3年以上（65歳以上の方がいる世帯は20年以上）もつときは「要対応」ではなく「注意」にします。預貯金が生活費の36か月分以上あり、滞納もないときは、生活保護などの案内を出さず、総合判定も「やや注意」までにとどめます。預貯金が借金の残高の1.5倍以上あるときは、借金の残高の大きさや借入先の数だけでは「要対応」にしません。毎月の赤字が収入の3％未満で月5,000円以下のときは、「要対応」でなく「注意」にします。預貯金の欄には、ご自身が自由に使えないお金が含まれていることもあるので、あくまで目安です。</li>' +
     '</ul><p class="chart-note">基準は' + esc(RISK_REF.asof) + 'のものです。</p></details></div>';
 }
 
@@ -1847,12 +1902,13 @@ function kataHTML(D, balance){
   const lowIncome = isBelowMinLiving(D);
   const dp = val("ex_debt");
   const dti = inc > 0 ? dp / inc * 100 : 0;
-  const debtHeavy = (D.debtCount !== null && D.debtCount >= THRESHOLDS.debtCountDanger) ||
-    dti >= THRESHOLDS.debtRatioCaution || (inc > 0 && D.debtTotal > inc * 4);
-  const fixed = val("ex_housing") + val("ex_comm") + val("ex_insurance") + val("ex_car");
-  const fixedHeavy = inc > 0 && fixed / inc >= 0.45;
-  /* 変動費型の判定は、本人が実際に入力した値だけで行う（平均による推定値では本人の使い方を評価できないため） */
+  const debtHeavy = isMultiDebt(D) ||
+    dti >= THRESHOLDS.debtRatioCaution || (inc > 0 && D.debtTotal > inc * 4 && !debtCovered(D));
+  /* 固定費過大型・変動費型の判定は、本人が実際に入力した値だけで行う（平均による推定値では本人の使い方を評価できないため。
+     たとえば車を持たない人の空欄に、平均の車の費用が入って「固定費が重い」と出ないように） */
   const realVal = id => { const f = D.expenses.find(e => e.id === id); return (f && !f.est) ? f.value : 0; };
+  const fixed = realVal("ex_housing") + realVal("ex_comm") + realVal("ex_insurance") + realVal("ex_car");
+  const fixedHeavy = inc > 0 && fixed / inc >= 0.45;
   const foodPct = inc > 0 ? realVal("ex_food") / inc * 100 : 0;
   const socialPct = inc > 0 ? realVal("ex_social") / inc * 100 : 0;
   const varHeavy = inc > 0 && (foodPct > GUIDELINES.food.max + 5 || socialPct > GUIDELINES.social.max + 5);
@@ -1865,13 +1921,19 @@ function kataHTML(D, balance){
   }
   if(debtHeavy){
     let sim = "";
-    if(D.debtTotal > 0){
+    const dk = debtKinds(D);
+    if(D.debtTotal > 0 && dk.mayBeConsumer){
       const m36 = Math.ceil(D.debtTotal / 36 / 100) * 100;
       const m60 = Math.ceil(D.debtTotal / 60 / 100) * 100;
       const afford = balance > 0 ? balance : 0;
       sim = "入力された借金総額" + yen(D.debtTotal) + "を、任意整理の一般的な分割（利息カット後、36〜60回払い）で返すとすると<b>月およそ" + yen(m60) + "〜" + yen(m36) + "</b>の返済です。現在の毎月の収支（" + (balance >= 0 ? "黒字" + yen(balance) : "赤字" + yen(Math.abs(balance))) + "）と見くらべると、" + (afford >= m60 ? "任意整理で完済できる可能性があります。" : "<b>任意整理だけでは返済の原資が足りない可能性が高く、個人再生・自己破産を含めた検討</b>が現実的です。");
     }
-    types.push("<p><b>【債務圧迫型】</b>借金の返済が家計を圧迫しており、節約で生み出せる額より返済負担のほうが大きい状態です。" + sim + "最終的な判断には専門家（弁護士・司法書士。費用が心配なら法テラス）の関与が必要です。</p>");
+    if(dk.onlyOrdinary){
+      /* 住宅ローン・自動車ローン・奨学金・親族からの借入れだけの場合は、任意整理の試算は当てはまらない。借入先ごとの返済条件の相談を先に勧める */
+      types.push("<p><b>【返済負担が重い型】</b>借入れの返済が家計を圧迫しており、節約で生み出せる額より返済負担のほうが大きい状態です。借入先ごとに、<b>返済の条件を見直せないか</b>を相談するのが先です（くわしくは下の方針案へ）。それでも難しいときは、専門家（弁護士・司法書士。費用が心配なら法テラス）の関与が必要です。カードローン・消費者金融・リボ払いなどの借入れもある場合は、「借入れの種類」にチェックを足してもう一度診断してください。</p>");
+    } else {
+      types.push("<p><b>【債務圧迫型】</b>借金の返済が家計を圧迫しており、節約で生み出せる額より返済負担のほうが大きい状態です。" + sim + "最終的な判断には専門家（弁護士・司法書士。費用が心配なら法テラス）の関与が必要です。</p>");
+    }
   }
   if(fixedHeavy){
     const fr = Math.round(fixed / inc * 100);
@@ -1895,6 +1957,8 @@ function kataHTML(D, balance){
         next = "次の目標は、臨時出費（家電の買替え・車検・冠婚葬祭）の年間見積もりです。預貯金も入力すると、万一の備えが足りているかも判定できます。";
       }
       types.push("<p><b>【安定型】</b>入力された範囲では、家計に大きな崩れは見られません。" + next + (balance > 0 && !(sm !== null && sm >= THRESHOLDS.savingsMonthsEnough) ? "黒字分は「余ったら貯める」ではなく<b>「先取りで別に移す」</b>のが最も確実です。" : "") + "</p>");
+    } else if(isTinyDeficit(D, balance)){
+      /* ごくわずかな赤字は、型としては取り上げない */
     } else if(balance < 0 && deficitRunway(D, balance) !== null){
       types.push("<p><b>【取り崩し型】</b>毎月の収支は赤字で、預貯金（生活費の" + monthsText(sm) + "）を取り崩して暮らす形です。このペースだと預貯金は<b>" + yearsText(deficitRunway(D, balance)) + "もつ</b>計算です。<b>貯金は使うほど減っていきます</b>。ご自身の年齢や、これからの医療・介護・物価の上昇なども考えて、取り崩しの額を見直しましょう。年に数回の出費は含まれていません。</p>");
     } else if(balance < 0){
@@ -1932,7 +1996,10 @@ function buildFlags(D){
   /* 家賃・住宅ローン滞納 */
   if(D.arrears.includes("rent")){
     flags.push({level:"danger", icon:"🏠", title:"家賃の滞納があります——住まいを守ることを最優先に",
-      body:"家賃の滞納が続くと住まいを失うおそれがあります。<b>大家さん・管理会社に早めに事情を伝えるとともに、「住居確保給付金」（家賃相当額の支給）が使える場合があります。</b>受付窓口は自立相談支援センターひょうご（079-284-5514）です。お電話でご相談ください。"});
+      body:"家賃の滞納が続くと住まいを失うおそれがあります。<b>大家さん・管理会社に早めに事情を伝える</b>ことが大切です。" +
+        (isOwnerHome(D)
+          ? "生活の立て直しの相談は、自立相談支援センターひょうご（079-284-5514）にお電話でご相談いただけます。"
+          : "あわせて、<b>「住居確保給付金」（家賃相当額の支給）が使える場合があります。</b>受付窓口は自立相談支援センターひょうご（079-284-5514）です。お電話でご相談ください。")});
   }
   if(D.arrears.includes("mortgage")){
     flags.push({level:"danger", icon:"🏠", title:"住宅ローンの滞納があります",
@@ -1945,7 +2012,10 @@ function buildFlags(D){
   }
   /* 収支 */
   const runway = both && balance < 0 ? deficitRunway(D, balance) : null;
-  if(runway !== null){
+  if(both && isTinyDeficit(D, balance)){
+    flags.push({level:"caution", icon:"⚖️", title:"ほぼ収支が同じです（毎月約"+yen(Math.abs(balance))+"の赤字）",
+      body:"収入と支出がほぼ同じで、余裕がない状態です。急な出費（家電の故障・医療費など）があると赤字になりやすいので、下の「めやすとの比較」で大きめの項目がないか確認してみてください。" + annualHint(D)});
+  } else if(runway !== null){
     /* 赤字でも、預貯金が生活費の12か月分以上あり、赤字のペースで3年以上もつなら「危険」にはしない */
     flags.push({level:"caution", icon:"📉", title:"毎月約"+yen(Math.abs(balance))+"の赤字です（預貯金がこのペースで"+yearsText(runway)+"もちます）",
       body:"今は預貯金を取り崩して暮らしている状態です。<b>貯金は使うほど減っていきます。</b>ご自身の年齢や、これからの医療・介護・物価の上昇なども考えて、取り崩しの額を見直しましょう。"});
@@ -1979,7 +2049,7 @@ function buildFlags(D){
     }
   }
   /* 多重債務 */
-  if(D.debtCount !== null && D.debtCount >= THRESHOLDS.debtCountDanger){
+  if(isMultiDebt(D)){
     flags.push({level:"danger", icon:"🔁", title:"借入先が"+D.debtCount+"か所以上あります（多重債務のおそれ）",
       body:"複数からの借入れは、返済のために借りる悪循環になりやすい状態です。<b>債務整理（任意整理・個人再生・自己破産など）で生活を立て直せる場合があります。</b>費用が心配な方も、法テラスの立替制度などがあります。まず相談を。"});
   }
@@ -2001,7 +2071,8 @@ function buildFlags(D){
   /* 学校関係 */
   if(D.arrears.includes("school")){
     flags.push({level:"caution", icon:"🎒", title:"学校関係の支払いの滞納があります",
-      body:"小・中学生のお子さんがいる世帯には、給食費や学用品費を援助する<b>「就学援助」の制度</b>があります。学校または町の教育委員会にご相談ください。"});
+      body:(D.kids === 0 ? "給食費や学用品費などの支払いに困るときは、学校または町の教育委員会に事情をお伝えください。"
+        : "小・中学生のお子さんがいる世帯には、給食費や学用品費を援助する<b>「就学援助」の制度</b>があります。学校または町の教育委員会にご相談ください。")});
   }
   /* 貯金（未回答のときは判定しない） */
   if(D.expenseTotal > 0 && D.savingsKnown){
@@ -2024,7 +2095,7 @@ function buildFlags(D){
   /* 求職中 */
   if(D.workStatus === "seeking"){
     flags.push({level:"info", icon:"💼", title:"お仕事を探し中の方へ",
-      body:"ハローワークの職業紹介のほか、離職などで家賃の支払いが難しい場合は<b>「住居確保給付金」</b>、" + (isLowIncomeForShikin(D) && !(both && balance >= D.incomeTotal * 0.1) ? "当面の生活費には（返済が必要な）<b>生活福祉資金の貸付</b>が使える場合があります。" : "") + "自立相談支援センターひょうご（079-284-5514）に直接ご相談いただくか、役場地域福祉課・社協へご相談ください。"});
+      body:"ハローワークの職業紹介のほか、" + (isOwnerHome(D) ? "" : "離職などで家賃の支払いが難しい場合は<b>「住居確保給付金」</b>、") + (isLowIncomeForShikin(D) && !(both && balance >= D.incomeTotal * 0.1) ? "当面の生活費には（返済が必要な）<b>生活福祉資金の貸付</b>が使える場合があります。" : "") + "自立相談支援センターひょうご（079-284-5514）に直接ご相談いただくか、役場地域福祉課・社協へご相談ください。"});
   }
   return flags;
 }
@@ -2043,7 +2114,8 @@ function buildPlans(D, flags, R){
 
   /* 0. 社協の特例貸付（コロナ）——当てはまる方には最優先で案内する */
   if(D.tokurei && D.tokurei.active &&
-     (D.tokurei.menjoHit || D.tokurei.fumei || D.tokurei.status === "arrears" || D.tokurei.monthly > 0)){
+     (D.tokurei.menjoHit || D.tokurei.fumei || D.tokurei.status === "arrears" ||
+      (D.tokurei.monthly > 0 && !(R && R.level === 0)))){   // 家計に問題がなく、ふつうに返している方には「返済の相談」を先頭に出さない
     const T = D.tokurei;
     let body = "";
     if(T.menjoHit){
@@ -2070,10 +2142,24 @@ function buildPlans(D, flags, R){
   }
   /* 2. 債務 */
   const debtPay = D.expenses.find(e => e.id === "ex_debt");
-  const hasDebtIssue = (D.debtCount !== null && D.debtCount >= THRESHOLDS.debtCountDanger) ||
+  const hasDebtIssue = isMultiDebt(D) ||
     (D.incomeTotal > 0 && debtPay && debtPay.value / D.incomeTotal >= THRESHOLDS.debtRatioCaution / 100) ||
-    D.arrears.includes("debt") || (D.incomeTotal > 0 && D.debtTotal > D.incomeTotal * 4);
-  if(hasDebtIssue){
+    D.arrears.includes("debt") || (D.incomeTotal > 0 && D.debtTotal > D.incomeTotal * 4 && !debtCovered(D));
+  const dk = debtKinds(D);
+  if(hasDebtIssue && dk.onlyOrdinary){
+    /* 住宅ローン・自動車ローン・奨学金・親族からの借入れだけ：任意整理・過払い金の話は当てはまらないので、借入先ごとの返済条件の相談を案内する */
+    let li = "";
+    if(dk.mortgage) li += "<li><b>住宅ローン</b>：返済が苦しくなる前に、借入先の金融機関へ返済条件の見直し（返済期間の延長など）を相談できます。滞納してからでは選べる方法が減ります。</li>";
+    if(dk.car) li += "<li><b>自動車ローン</b>：借入先（信販会社・金融機関）に、支払い方法の見直しを早めに相談してください。</li>";
+    if(dk.scholarship) li += "<li><b>奨学金</b>：日本学生支援機構の奨学金なら、毎月の返還額を減らして期間を延ばす<b>「減額返還」</b>と、返還を待ってもらう<b>「返還期限猶予」</b>があります（どちらも申請と審査が必要。返還総額は変わりません。延滞があると減額返還は使えません）。遅れる前に機構へ相談を。自治体・大学・社協などの奨学金や貸付は、貸してくれた団体に返還の相談をしてください。</li>";
+    if(dk.kin) li += "<li><b>親族・知人からの借入れ</b>：無理のない返し方を話し合い、金額と期日を書面やメモに残しておくと、後々の行き違いを防げます。</li>";
+    plans.push({pr:1, prLabel:"早めに",
+      title:"借入れの返済の負担を軽くする相談をする",
+      body:"<p>返済が収入に対して重くなっています。借入れの種類ごとに、<b>返済の条件を見直せる仕組み</b>があります。</p><ul>" + li + "</ul>" +
+      "<p>それでも返済が難しいときは、弁護士・司法書士による債務整理（法テラスで無料相談・費用の立替えが使える場合があります）という方法もあります。<b>ひとりで抱えず、先にご相談を。</b></p>" +
+      "<p style='font-size:14px;color:var(--sub);'>※ ほかに、カードローン・消費者金融・リボ払いなどの借入れもある場合は、入力画面の「借入れの種類」にチェックを足して、もう一度診断してください。</p>",
+      win:"法テラス・サポートダイヤル 0570-078374（平日9〜21時・土曜9〜17時）／ 自立相談支援センターひょうご 079-284-5514（生活の立て直しの相談）／ 役場地域福祉課 079-492-9136"});
+  } else if(hasDebtIssue){
     let sim = "";
     if(D.debtTotal > 0){
       const m36 = Math.ceil(D.debtTotal / 36 / 100) * 100;
@@ -2084,34 +2170,52 @@ function buildPlans(D, flags, R){
       title:"借金の整理（債務整理）を専門家に相談する",
       body:"<p>借金の法的な整理には、おもに次の方法があります。いずれも弁護士・司法書士と進めます。</p><ul>" +
       "<li><b>任意整理</b>：裁判所を通さず業者と交渉し、将来の利息をカットして元本をおおむね<b>3〜5年（36〜60回）</b>で分割返済する方法。安定収入があり、元本なら払い切れる人向け。</li>" +
-      "<li><b>個人再生</b>：裁判所の手続で借金を大幅に減額（法律で最低弁済額の定めあり）し、原則3年で返済。<b>住宅ローン特則を使えば持ち家を残せる</b>可能性があります。</li>" +
+      "<li><b>個人再生</b>：裁判所の手続で借金を大幅に減額（法律で最低弁済額の定めあり）し、原則3年で返済。" + (dk.mortgage ? "<b>住宅ローン特則を使えば持ち家を残せる</b>可能性があります。" : "") + "</li>" +
       "<li><b>自己破産</b>：支払いが不可能な場合に、裁判所の免責で支払い義務をなくす制度。生活に必要な家財は残せます。怖い言葉に聞こえますが、生活再建のための正当な制度です。</li>" +
-      "<li><b>過払い金</b>：おおむね2010年より前から消費者金融・カード会社と取引がある場合、払いすぎた利息が戻る可能性があります。</li></ul>" + sim +
+      ((D.debtTypes.length === 0 || D.debtTypes.includes("消費者金融") || D.debtTypes.includes("クレジットカードのリボ払い・キャッシング")) ? "<li><b>過払い金</b>：おおむね2010年より前から消費者金融・カード会社と取引がある場合、払いすぎた利息が戻る可能性があります。</li>" : "") + "</ul>" + sim +
       "<p>収入が少ない方は<b>法テラスの無料法律相談・弁護士費用の立替え</b>が使えます。また、新たに借りて返済に充てる方法（借換え・おまとめ）は、貸金業法の総量規制（年収の3分の1まで）に近づくほど行き詰まります——<b>「借りて返す」から「整理して立て直す」へ</b>の切り替えが実務の鉄則です。</p>",
       win:"法テラス・サポートダイヤル 0570-078374（平日9〜21時・土曜9〜17時）／ 自立相談支援センターひょうご 079-284-5514（生活の立て直しの相談）／ 役場地域福祉課 079-492-9136"});
   }
   /* 3. 滞納の納付相談 */
   if(D.arrears.includes("tax") || D.arrears.includes("kokuho") || D.arrears.includes("nenkin") || D.arrears.includes("school") || D.arrears.includes("mobile")){
+    /* 滞納しているものだけを載せる（チェックしていない項目の説明は出さない） */
+    const has = k => D.arrears.includes(k);
+    const winParts = [];
+    if(has("tax") || has("kokuho")) winParts.push("税金・国保 → 役場の担当課");
+    if(has("nenkin")) winParts.push("年金 → 年金事務所");
+    if(has("school")) winParts.push("学校関係 → 学校または町の教育委員会");
+    if(has("mobile")) winParts.push("携帯電話 → 契約している携帯会社");
+    winParts.push("どこに言えばいいか分からないとき → 自立相談支援センターひょうご 079-284-5514（電話で直接相談できます）");
+    winParts.push("役場地域福祉課 079-492-9136");
     plans.push({pr:2, prLabel:"なるべく早く",
       title:"滞納している支払いの「納付相談」をする",
       body:"<p>滞納は、<b>払えない事情を早めに窓口へ伝えることがいちばんの対処法</b>です。制度上も、相談すれば使える仕組みが用意されています。</p><ul>" +
-      "<li><b>税金</b>：分割納付の相談ができるほか、事情によっては徴収（差押え）や換価の猶予という法律上の猶予制度があります。放置すると延滞金が増え、差押えに進むおそれがあります。</li>" +
-      "<li><b>国民健康保険料</b>：所得の減少などによる<b>減免・軽減</b>の制度があります。滞納したままだと保険証（資格）の扱いが不利になることがあるため、早めの相談を。</li>" +
-      "<li><b>国民年金</b>：<b>免除・納付猶予</b>の手続きをすれば未納になりません（受給資格期間に算入されます）。手続きしない未納がいちばん損です。</li>" +
-      "<li><b>学校関係</b>：小・中学生のいる世帯は<b>就学援助</b>（給食費・学用品費等の援助）の対象になる場合があります。</li>" +
-      "<li><b>携帯電話</b>：端末代の分割滞納は信用情報に記録され、将来のローン・カードに影響します。支払い相談とプラン見直しを。</li></ul>",
-      win:"税金・国保 → 役場の担当課 ／ 年金 → 年金事務所 ／ どこに言えばいいか分からないとき → 自立相談支援センターひょうご 079-284-5514（電話で直接相談できます）／ 役場地域福祉課 079-492-9136"});
+      (has("tax") ? "<li><b>税金</b>：分割納付の相談ができるほか、事情によっては徴収（差押え）や換価の猶予という法律上の猶予制度があります。放置すると延滞金が増え、差押えに進むおそれがあります。</li>" : "") +
+      (has("kokuho") ? "<li><b>国民健康保険料</b>：所得の減少などによる<b>減免・軽減</b>の制度があります。滞納したままだと保険証（資格）の扱いが不利になることがあるため、早めの相談を。</li>" : "") +
+      (has("nenkin") ? "<li><b>国民年金</b>：<b>免除・納付猶予</b>の手続きをすれば未納になりません（受給資格期間に算入されます）。手続きしない未納がいちばん損です。</li>" : "") +
+      (has("school") ? (D.kids === 0
+        ? "<li><b>学校関係</b>：給食費や教材費などの支払いに困るときは、学校または町の教育委員会に事情を伝えて相談を。</li>"
+        : "<li><b>学校関係</b>：小・中学生のいる世帯は<b>就学援助</b>（給食費・学用品費等の援助）の対象になる場合があります。</li>") : "") +
+      (has("mobile") ? "<li><b>携帯電話</b>：端末代の分割滞納は信用情報に記録され、将来のローン・カードに影響します。支払い相談とプラン見直しを。</li>" : "") + "</ul>",
+      win: winParts.join(" ／ ")});
   }
   /* 4. 支出の見直し */
   if(D.incomeTotal > 0 && D.expenseTotal > 0){
-    const overs = D.exUsed.filter(e => e.gkey && GUIDELINES[e.gkey] &&
+    /* 見直しの提案は、本人が実際に入力した金額だけで行う（空欄を平均で補った推定値で、
+       使っていないかもしれない車や通信の「見直し」を勧めないため） */
+    const overs = D.exUsed.filter(e => !e.est && e.gkey && GUIDELINES[e.gkey] &&
       (e.value / D.incomeTotal * 100) > GUIDELINES[e.gkey].max)
       .sort((a,b) => (b.value/D.incomeTotal - a.value/D.incomeTotal));
     if(overs.length > 0){
       const tips = {
         comm: "格安プラン・格安SIMへの変更で月数千円下がることがあります。ショップよりも、まず現在の請求明細の確認から。",
         insurance: "保障が重複していないか、収入に対して掛け金が大きすぎないかの点検を。共済など掛け金の軽い選択肢もあります。",
-        housing: "収入に対して住居費が重い状態です。公営住宅への住み替えの検討を。" +
+        housing: "収入に対して住居費が重い状態です。" +
+          (D.housingType === "own_loan" ? "住宅ローンの返済条件の見直し（返済期間の延長など）を、借入先の金融機関に相談できます。"
+            : D.housingType === "own" ? ""
+            : D.housingType === "public" ? "家賃の減額・減免の制度がないか、管理している窓口に確認を。"
+            : D.housingType === null ? "賃貸にお住まいの場合は、公営住宅への住み替えの検討を。"
+            : "公営住宅への住み替えの検討を。") +
           (needy && (D.housingType === "rent" || D.housingType === "public" || D.housingType === "company")
             ? "離職や収入の減少で家賃の支払いが難しいときは、住居確保給付金の対象にならないかの確認も。" : ""),
         car: "任意保険の見直し、車検・ガソリンの節約のほか、台数を減らせないかの検討も（生活に車が必要な地域なので、手放す前に必ず窓口でご相談を）。",
@@ -2142,11 +2246,11 @@ function buildPlans(D, flags, R){
     const balanceP = D.incomeTotal - D.expenseTotal;
     const strained = hasDanger || flags.some(f => f.level === "caution") || isBelowMinLiving(D) ||
       (D.incomeTotal > 0 && D.expenseTotal > 0 && balanceP < D.incomeTotal * 0.1);
-    const hasKids = D.kids !== null && D.kids >= 1;
+    const hasKids = D.kids !== null && D.kids >= 1 && D.hhSize !== 1;   // 1人世帯と「お子さんあり」は両立しない入力なので、子ども向けの制度は出さない
     let items = [];
     if(hasKids) items.push("児童手当（高校生年代まで・所得制限はありません。申請が必要です）");
     if(hasKids && needy) items.push("就学援助（小・中学生のいる世帯の給食費・学用品費などの援助。前年の世帯の所得が基準以下の場合に対象になります）");
-    if(D.flags.singleParent) items.push("児童扶養手当などのひとり親向けの支援（所得によって、対象かどうか・金額が決まります）");
+    if(D.flags.singleParent && D.kids !== 0 && D.hhSize !== 1) items.push("児童扶養手当などのひとり親向けの支援（所得によって、対象かどうか・金額が決まります）");
     if(D.flags.disability) items.push("障害年金・各種手当・医療費の軽減（対象になるかどうか、窓口で確認を）");
     if(D.flags.elderly) items.push("年金の受給内容の確認・高齢者向けの負担軽減");
     if(D.workStatus === "seeking" || D.workStatus === "parttime") items.push("ハローワークの職業紹介・職業訓練（条件を満たすと、訓練中の給付金もあります）");
@@ -2403,8 +2507,8 @@ function buildReport(){
     h += "<tr><th>返済の状況</th><td>"+(T.statusText||"—")+"</td></tr>";
     h += "<tr><th>残高（概算）</th><td>"+(T.balanceBlank?"0円（空欄）":yen(T.balance))+"</td></tr>";
     h += "<tr><th>毎月の返済額</th><td>"+(T.monthlyBlank?"0円（空欄）":yen(T.monthly))+"</td></tr>";
-    h += "<tr><th>免除要件の該当（本人申告）</th><td>"+(menjo.length?menjo.map(esc).join("・"):"該当なし")+"</td></tr>";
-    h += "<tr><th>ナビの表示</th><td>"+(T.use==="menjo"?"「免除になっている」との回答を表示":T.use==="done"?"「返済済み」との回答を表示":T.menjoHit?"「償還免除に当てはまる可能性がある」旨を表示":(T.fumei?"「住民税の確認が必要」旨を表示":"免除要件に該当なしと表示"))+"</td></tr>";
+    h += "<tr><th>免除要件の該当（本人申告）</th><td>"+(menjo.length?menjo.map(esc).join("・"):"チェックなし（該当するかは未確認）")+"</td></tr>";
+    h += "<tr><th>ナビの表示</th><td>"+(T.use==="menjo"?"「免除になっている」との回答を表示":T.use==="done"?"「返済済み」との回答を表示":T.menjoHit?"「償還免除に当てはまる可能性がある」旨を表示":(T.fumei?"「住民税の確認が必要」旨を表示":"免除の確認欄にチェックがないため、判定できない旨を表示"))+"</td></tr>";
     h += "</table>";
     h += "<p style='font-size:12px;color:#666;'>※本人の自己申告に基づく表示です。免除の可否は兵庫県社会福祉協議会が判定します（特例貸付コールセンター "+esc(TOKUREI.callcenter)+"）。</p>";
   }
@@ -2433,10 +2537,11 @@ function buildReport(){
     const checks = D.checks || buildFlags(D);
     const mk = {danger:"【要対応】", caution:"【注意】", info:"【案内】", ok:"【良好】"};
     const ml = minLivingCost(D);
-    if(checks.length || ml){
+    const showMl = ml && showSeihoRef(D, D.risk);
+    if(checks.length || showMl){
       h += "<h3>5-2. ナビのチェック結果（要点）</h3><ul style='margin:4px 0;padding-left:20px;'>";
       checks.forEach(f => { h += "<li>"+(mk[f.level]||"")+esc(f.title)+"</li>"; });
-      if(ml) h += "<li>【参考】最低生活費のめやす（控えめな試算）：月約"+yen(ml.amount)+"（"+esc(ml.parts.join("＋"))+"・"+esc(SEIHO_ASOF)+"）</li>";
+      if(showMl) h += "<li>【参考】最低生活費のめやす（控えめな試算）：月約"+yen(ml.amount)+"（"+esc(ml.parts.join("＋"))+"・"+esc(SEIHO_ASOF)+"）</li>";
       h += "</ul>";
     }
   }
