@@ -169,6 +169,8 @@
   }
   input[type="text"].yen:focus{outline:none;border-color:var(--blue);}
   .yen-unit{font-size:15px;color:var(--sub);flex-shrink:0;}
+  input.yen.bad{border-color:var(--danger);background:var(--danger-bg);}
+  .yen-err{font-size:13px;color:var(--danger);margin-top:4px;line-height:1.5;}
   select{
     border:1.5px solid var(--line);border-radius:10px;padding:10px 12px;
     font-family:inherit;font-size:17px;background:#fff;max-width:100%;
@@ -913,7 +915,8 @@ function esc(s){
 function readYen(id){
   const el = document.getElementById(id);
   if(!el) return null;
-  const raw = el.value.replace(/[，,、\s円]/g,"").replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0)-0xFEE0));
+  const raw = el.value.replace(/[，,、\s円¥￥]/g,"").replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0)-0xFEE0))
+    .replace(/．/g, ".").replace(/^(約|およそ|だいたい)/, "").replace(/(くらい|ぐらい|ほど|程度|前後)$/, "");
   if(raw === "") return null;
   const n = parseYenAmount(raw);
   if(n === null || isNaN(n) || n < 0) return null;
@@ -929,6 +932,31 @@ function readYen(id){
      ここで 0 を補ってはいけない。
    ・整形でカーソルが末尾に飛ばないよう、カーソルの前にある数字の個数を数えて
      同じ位置に戻す。 */
+/* 金額として読み取れない文字（例：「十五万」「15〜20万」「不明」）が入っている欄に印を付ける。
+   読み取れない欄は空欄と同じ扱いになるので、気づかないまま診断がずれないようにする。 */
+function isUnreadableYen(el){
+  return el.value.trim() !== "" && readYen(el.id) === null;
+}
+function markYenField(el){
+  const bad = isUnreadableYen(el);
+  el.classList.toggle("bad", bad);
+  const field = el.closest(".field");
+  if(!field) return;
+  let msg = field.querySelector(".yen-err");
+  if(bad && !msg){
+    msg = document.createElement("div");
+    msg.className = "yen-err";
+    msg.textContent = "金額として読み取れません。「150000」や「15万」のように数字でご記入ください（このままだと空欄として扱います）。";
+    field.appendChild(msg);
+  }
+  if(msg) msg.style.display = bad ? "" : "none";
+}
+function unreadableYenLabels(){
+  return [...document.querySelectorAll("input.yen")].filter(isUnreadableYen).map(el => {
+    const lb = document.querySelector('label[for="' + el.id + '"]');
+    return lb ? lb.firstChild.textContent.trim() : el.id;
+  });
+}
 function toHalfWidth(s){
   return s.replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0)-0xFEE0));
 }
@@ -1103,7 +1131,7 @@ function init(){
   ["input","change"].forEach(ev => sec4.addEventListener(ev, () => { SEC4_TOUCHED = true; }));
 
   document.querySelectorAll("input.yen").forEach(inp => {
-    inp.addEventListener("input", () => { formatYenField(inp); updateSubtotals(); });
+    inp.addEventListener("input", () => { formatYenField(inp); markYenField(inp); updateSubtotals(); });
   });
   document.querySelectorAll(".chk input").forEach(c => {
     c.addEventListener("change", () => c.closest(".chk").classList.toggle("checked", c.checked));
@@ -1433,6 +1461,11 @@ function runDiagnosis(){
   }
 
   /* --- 推定・0円扱いの内訳 --- */
+  {
+    const bad = unreadableYenLabels();
+    if(bad.length) out.push('<div class="flag caution"><span class="ft">⚠️ 金額として読み取れなかった欄があります</span>' +
+      esc(bad.join("・")) + '——この欄は<b>空欄として</b>計算しています。入力画面にもどり、「150000」や「15万」のように数字で入れ直すと、診断が正確になります。</div>');
+  }
   out.push(estimatesNoteHTML(D));
 
   /* --- 支出内訳 円グラフ --- */
@@ -2050,7 +2083,7 @@ function buildFlags(D){
   }
   /* 多重債務 */
   if(isMultiDebt(D)){
-    flags.push({level:"danger", icon:"🔁", title:"借入先が"+D.debtCount+"か所以上あります（多重債務のおそれ）",
+    flags.push({level:"danger", icon:"🔁", title:"借入先が"+D.debtCount+"か所"+(D.debtCount >= 5 ? "以上" : "")+"あります（多重債務のおそれ）",
       body:"複数からの借入れは、返済のために借りる悪循環になりやすい状態です。<b>債務整理（任意整理・個人再生・自己破産など）で生活を立て直せる場合があります。</b>費用が心配な方も、法テラスの立替制度などがあります。まず相談を。"});
   }
   /* 税・国保 */
@@ -2322,10 +2355,16 @@ function firstBoxHTML(D, balance, flags, plans, R){
   if(R){
     li.push('総合的な家計のリスク度は<b style="color:' + R.color + ';">「' + R.label + '」</b>です（' + R.sub + '）。');
   }
-  if(D.incomeTotal > 0 || D.expenseTotal > 0){
+  if(D.incomeTotal > 0 && D.expenseTotal > 0){
     li.push(balance < 0
       ? '毎月の収支は<b style="color:var(--danger);">約' + yen(Math.abs(balance)) + 'の赤字</b>です。'
+      : balance === 0
+      ? '毎月の収入と支出は<b>ちょうど同じ</b>です。'
       : '毎月の収支は<b style="color:var(--ok);">約' + yen(balance) + 'の黒字</b>です。');
+  } else if(D.incomeTotal > 0){
+    li.push('支出の金額が入っていないため、<b>毎月の収支はまだ判定していません</b>。支出を入れると、黒字か赤字かが分かります。');
+  } else if(D.expenseTotal > 0){
+    li.push('収入が0円のままのため、<b>毎月の収支はまだ判定していません</b>。収入があれば入力してください。');
   }
   const dangers = flags.filter(f => f.level === "danger" && !/赤字です$/.test(f.title));
   if(dangers.length){
