@@ -918,6 +918,7 @@ function readYen(id){
   const raw = el.value.replace(/[，,、\s円¥￥]/g,"").replace(/[０-９]/g, d => String.fromCharCode(d.charCodeAt(0)-0xFEE0))
     .replace(/．/g, ".").replace(/^(約|およそ|だいたい)/, "").replace(/(くらい|ぐらい|ほど|程度|前後)$/, "");
   if(raw === "") return null;
+  if(/^(?:なし|無し|ない|ゼロ|ー|－|―|-)$/.test(raw)) return 0;   // 「なし」「ー」は0円として読む
   const n = parseYenAmount(raw);
   if(n === null || isNaN(n) || n < 0) return null;
   return Math.round(n);
@@ -946,7 +947,7 @@ function markYenField(el){
   if(bad && !msg){
     msg = document.createElement("div");
     msg.className = "yen-err";
-    msg.textContent = "金額として読み取れません。「150000」や「15万」のように数字でご記入ください（このままだと空欄として扱います）。";
+msg.textContent = "この欄は金額として読み取れませんでした。「150000」や「15万」のように数字で入れていただくと読み取れます（このままの場合は空欄として扱います）。";
     field.appendChild(msg);
   }
   if(msg) msg.style.display = bad ? "" : "none";
@@ -1131,7 +1132,10 @@ function init(){
   ["input","change"].forEach(ev => sec4.addEventListener(ev, () => { SEC4_TOUCHED = true; }));
 
   document.querySelectorAll("input.yen").forEach(inp => {
-    inp.addEventListener("input", () => { formatYenField(inp); markYenField(inp); updateSubtotals(); });
+    /* かな漢字変換の途中（「15まん」）では赤い印を出さない。確定したときに判定する */
+    inp.addEventListener("input", (e) => { formatYenField(inp); if(!e.isComposing) markYenField(inp); updateSubtotals(); });
+    inp.addEventListener("compositionend", () => { markYenField(inp); updateSubtotals(); });
+    inp.addEventListener("blur", () => markYenField(inp));
   });
   document.querySelectorAll(".chk input").forEach(c => {
     c.addEventListener("change", () => c.closest(".chk").classList.toggle("checked", c.checked));
@@ -2352,6 +2356,11 @@ function telLinks(html){
    結果画面は長いので、いちばん上に「いまの状態」と「最初の一歩」だけを置く。 */
 function firstBoxHTML(D, balance, flags, plans, R){
   const li = [];
+  {
+    /* 読み取れなかった金額欄があるときは、いちばん先に知らせる（収入欄だと「収入0円」の判定が出てしまうため） */
+    const bad = unreadableYenLabels();
+    if(bad.length) li.push('<b>金額として読み取れなかった欄があります（' + esc(bad.join("・")) + '）。</b>この欄は空欄として計算しているため、下の結果は実際とちがう可能性があります。入力画面にもどって、数字で入れ直してみてください。');
+  }
   if(R){
     li.push('総合的な家計のリスク度は<b style="color:' + R.color + ';">「' + R.label + '」</b>です（' + R.sub + '）。');
   }
